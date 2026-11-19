@@ -11,6 +11,10 @@
 #include <aclapi.h>
 #include <sddl.h>
 #include <objbase.h>
+#include <exdisp.h>
+#include <shldisp.h>
+#include <shlguid.h>
+#include <wrl/client.h>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -25,6 +29,7 @@
 #pragma comment(lib, "user32.lib")
 #pragma comment(lib, "gdi32.lib")
 #pragma comment(lib, "ole32.lib")
+#pragma comment(lib, "oleaut32.lib")
 #pragma comment(                                                                                   \
     linker,                                                                                        \
     "/manifestdependency:\"type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' processorArchitecture='*' publicKeyToken='6595b64144ccf1df' language='*'\"")
@@ -856,6 +861,88 @@ int elevatedSelfTest()
     return result;
 }
 
+enum class ShellElevation
+{
+    Unknown,
+    Limited,
+    Elevated
+};
+
+// Unknown is never treated as limited so a relaunch can never loop back into administrator mode.
+ShellElevation desktopShellElevation()
+{
+    DWORD processId = 0;
+    const HWND shell = GetShellWindow();
+    if (!shell || !GetWindowThreadProcessId(shell, &processId))
+        return ShellElevation::Unknown;
+    const HANDLE shellProcess = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, processId);
+    if (!shellProcess)
+        return ShellElevation::Unknown;
+    FileHandle process(shellProcess);
+    HANDLE shellToken = nullptr;
+    if (!OpenProcessToken(process.value, TOKEN_QUERY, &shellToken))
+        return ShellElevation::Unknown;
+    FileHandle token(shellToken);
+    TOKEN_ELEVATION elevation{};
+    DWORD size = 0;
+    if (!GetTokenInformation(shellToken, TokenElevation, &elevation, sizeof(elevation), &size))
+        return ShellElevation::Unknown;
+    return elevation.TokenIsElevated ? ShellElevation::Elevated : ShellElevation::Limited;
+}
+
+// Starts this executable through the desktop shell, which runs with the user's normal token.
+bool relaunchWithoutElevation(const std::wstring &arguments)
+{
+    if (desktopShellElevation() != ShellElevation::Limited)
+        return false;
+    wchar_t executable[32768]{};
+    const DWORD length = GetModuleFileNameW(nullptr, executable, ARRAYSIZE(executable));
+    if (!length || length == ARRAYSIZE(executable))
+        return false;
+
+    const HRESULT initialized =
+        CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
+    bool launched = false;
+    {
+        using Microsoft::WRL::ComPtr;
+        ComPtr<IShellWindows> windows;
+        ComPtr<IDispatch> desktop, background, application;
+        ComPtr<IServiceProvider> provider;
+        ComPtr<IShellBrowser> browser;
+        ComPtr<IShellView> view;
+        ComPtr<IShellFolderViewDual> folderView;
+        ComPtr<IShellDispatch2> shell;
+        VARIANT empty{};
+        long desktopWindow = 0;
+        if (SUCCEEDED(CoCreateInstance(CLSID_ShellWindows, nullptr, CLSCTX_LOCAL_SERVER,
+                                       IID_PPV_ARGS(&windows))) &&
+            windows->FindWindowSW(&empty, &empty, SWC_DESKTOP, &desktopWindow,
+                                  SWFO_NEEDDISPATCH, &desktop) == S_OK &&
+            desktop && SUCCEEDED(desktop.As(&provider)) &&
+            SUCCEEDED(provider->QueryService(SID_STopLevelBrowser, IID_PPV_ARGS(&browser))) &&
+            SUCCEEDED(browser->QueryActiveShellView(&view)) &&
+            SUCCEEDED(view->GetItemObject(SVGIO_BACKGROUND, IID_PPV_ARGS(&background))) &&
+            SUCCEEDED(background.As(&folderView)) &&
+            SUCCEEDED(folderView->get_Application(&application)) &&
+            SUCCEEDED(application.As(&shell)))
+        {
+            BSTR file = SysAllocString(executable);
+            VARIANT parameters{}, show{};
+            parameters.vt = VT_BSTR;
+            parameters.bstrVal = SysAllocString(arguments.c_str());
+            show.vt = VT_I4;
+            show.lVal = SW_SHOWNORMAL;
+            launched = file && parameters.bstrVal &&
+                       SUCCEEDED(shell->ShellExecute(file, parameters, empty, empty, show));
+            SysFreeString(parameters.bstrVal);
+            SysFreeString(file);
+        }
+    }
+    if (SUCCEEDED(initialized))
+        CoUninitialize();
+    return launched;
+}
+
 int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR args, int)
 {
     const std::wstring arguments(args);
@@ -900,10 +987,33 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR args, int)
 
     if (elevated && (!registered || !protectElevatedConfigDirectory(config)))
     {
-        message(L"Administrator mode requires Equalizer APO's config in a protected Program "
-                L"Files folder. For another location, run AutoAPO normally with write access "
-                L"to that config.");
-        return 1;
+        // Equalizer APO normally lets users edit its config folder, so administrator rights are
+        // unnecessary there and unsafe to use. Continue as the normal user instead.
+        for (HANDLE handle : protectedDirectories)
+            CloseHandle(handle);
+        protectedDirectories.clear();
+        CloseHandle(mutex);
+        if (relaunchWithoutElevation(arguments))
+            return 0;
+        if (desktopShellElevation() != ShellElevation::Elevated)
+        {
+            message(L"AutoAPO was started as administrator, but Equalizer APO's config is not in "
+                    L"a protected Program Files folder, so administrator mode is not available. "
+                    L"Start AutoAPO normally, without \"Run as administrator\".");
+            return 1;
+        }
+        // The desktop itself runs as administrator (UAC is off, or this is the built-in
+        // Administrator account), so no normal-rights session exists to return to and none can
+        // be put at risk. Continue in normal mode with this token.
+        elevated = false;
+        mutex = CreateMutexW(nullptr, FALSE, L"Local\\AutoAPO.SingleInstance");
+        if (GetLastError() == ERROR_ALREADY_EXISTS)
+        {
+            if (!startInTray)
+                MessageBoxW(0, L"AutoAPO is already running. Open it from the system tray.",
+                            L"AutoAPO", MB_OK);
+            return 0;
+        }
     }
 
     std::string savedPreferences;

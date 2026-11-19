@@ -16,7 +16,7 @@ The watcher checks every two seconds. Multiple games use OR logic: automatic ent
 
 ## Configuration handling
 
-Administrator mode only accepts Equalizer APO's registered config in a protected folder under Program Files. Custom config selection and startup registration are available in normal mode. Administrator preferences are stored separately in the machine registry. Set up your rules again the first time you use administrator mode after upgrading.
+Administrator mode only accepts Equalizer APO's registered config in a protected folder under Program Files. If AutoAPO is started as administrator and the config folder is user-writable (the Equalizer APO default) or not registered, it restarts itself without administrator rights. If the Windows desktop itself runs as administrator (UAC turned off, or the built-in Administrator account), no normal-rights session exists, so AutoAPO continues in normal mode instead. Custom config selection and startup registration are available in normal mode. Administrator preferences are stored separately in the machine registry. Set up your rules again the first time you use administrator mode after upgrading.
 
 - Only the selected file is edited. Includes appear as single entries; contents of included files are not expanded.
 - The first write saves `<config filename>.AutoAPO.backup` beside the original. Existing backups are retained.
