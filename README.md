@@ -24,7 +24,7 @@ Administrator mode only accepts Equalizer APO's registered config in a protected
 - The first write saves `<config filename>.AutoAPO.backup` beside the original. Existing backups are retained.
 - Writes add/remove a leading comment marker, preserving UTF-8 text, BOM and line endings. UTF-16 input is unsupported.
 - Peace's `Include: peace.txt` supports manual and automatic switching. Structural commands remain protected.
-- Rules match complete commands, independent of line order. For `VSTPlugin` commands the order of the parameters does not matter either, so a Configuration Editor save that only reorders them keeps the rule. Changing a parameter's value changes the command's identity: reselect Auto for that entry afterward. Identical duplicate commands cannot be automated.
+- Rules match complete commands, independent of line order. For `VSTPlugin` commands the order of the parameters does not matter either, and a `Library` path written relative to the config folder (`..\config\vst\x.dll`) matches the same file written as a full path, in any letter case. So a Configuration Editor save that only reorders parameters or rewrites the plugin path keeps the rule. Changing a parameter's value changes the command's identity: reselect Auto for that entry afterward. Identical duplicate commands cannot be automated.
 - AutoAPO creates a fresh temporary file for each write and uses Windows file replacement to preserve the target's access rules. External edits detected before replacement cancel that write. Avoid simultaneous editing during mode changes.
 - Normal-mode preferences live in `%LOCALAPPDATA%\AutoAPO\settings.txt`.
 

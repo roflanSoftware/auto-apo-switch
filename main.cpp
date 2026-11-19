@@ -278,6 +278,10 @@ std::vector<std::wstring> processes;
 // plugin's parameters in a different order when it saves, so a VSTPlugin command is reduced
 // to its name/value pairs sorted by name, each quoted the same way. Other commands keep their
 // text. The result is itself a valid command, so applying this twice gives the same key.
+std::wstring wide(const std::string &s);
+std::string utf8(const std::wstring &w);
+std::wstring lower(std::wstring s);
+
 std::string canonicalKey(const std::string &command)
 {
     static const std::string prefix = "VSTPlugin:";
@@ -311,7 +315,20 @@ std::string canonicalKey(const std::string &command)
         return command;
     std::vector<std::pair<std::string, std::string>> pairs;
     for (size_t t = 0; t < tokens.size(); t += 2)
-        pairs.push_back({tokens[t], tokens[t + 1]});
+    {
+        std::string value = tokens[t + 1];
+        // The editor and the installer may write the same DLL as "..\config\vst\x.dll" or as a
+        // full path. Equalizer APO resolves relative paths from the config file's folder, so do
+        // the same and ignore letter case (Windows paths are case-insensitive).
+        if (_stricmp(tokens[t].c_str(), "Library") == 0 && !value.empty())
+        {
+            fs::path library(wide(value));
+            if (library.is_relative() && !config.empty())
+                library = fs::path(config).parent_path() / library;
+            value = utf8(lower(library.lexically_normal().wstring()));
+        }
+        pairs.push_back({tokens[t], value});
+    }
     std::sort(pairs.begin(), pairs.end());
     std::string key = prefix;
     for (const auto &pair : pairs)
@@ -1274,7 +1291,15 @@ int selfTest()
         const std::string b = "VSTPlugin: Library x.dll \"Band 1 Range\" 0.3  \"Band 1 State\" 1";
         const std::string c = "VSTPlugin: Library \"x.dll\" \"Band 1 State\" 1 \"Band 1 Range\" 0.4";
         const std::string broken = "VSTPlugin: Library \"x.dll";
-        if (canonicalKey(a) != canonicalKey(b) || canonicalKey(a) == canonicalKey(c) ||
+        // The same DLL written relative to the config folder and as a full path.
+        const auto folder = fs::path(config).parent_path();
+        const std::string relative =
+            "VSTPlugin: Library \"..\\" + utf8(folder.filename().wstring()) + "\\vst\\X.dll\" A 1";
+        const std::string absolute =
+            "VSTPlugin: Library \"" + utf8(folder.wstring()) + "\\vst\\x.dll\" A 1";
+        if (canonicalKey(relative) != canonicalKey(absolute) ||
+            canonicalKey(canonicalKey(relative)) != canonicalKey(relative) ||
+            canonicalKey(a) != canonicalKey(b) || canonicalKey(a) == canonicalKey(c) ||
             canonicalKey(canonicalKey(a)) != canonicalKey(a) ||
             canonicalKey("Include: peace.txt") != "Include: peace.txt" ||
             canonicalKey(broken) != broken)
@@ -1520,16 +1545,26 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR args, int)
         }
     }
     std::wstring watched = L"TslGame.exe";
+    // Also strip line endings written by other tools: the PUBG installer writes this file
+    // with CRLF, and a UTF-8 byte-order mark may come from editing it by hand.
+    if (savedPreferences.compare(0, 3, "\xef\xbb\xbf") == 0)
+        savedPreferences.erase(0, 3);
     std::istringstream prefs(savedPreferences);
     std::string s;
-    if (std::getline(prefs, s) && !s.empty() &&
-        (elevated ? wide(s) == config : isLocalPath(wide(s))))
+    auto readLine = [&] {
+        if (!std::getline(prefs, s))
+            return false;
+        if (!s.empty() && s.back() == '\r')
+            s.pop_back();
+        return true;
+    };
+    if (readLine() && !s.empty() && (elevated ? wide(s) == config : isLocalPath(wide(s))))
     {
         if (!elevated)
             config = wide(s);
-        if (std::getline(prefs, s))
+        if (readLine())
             watched = wide(s);
-        while (std::getline(prefs, s))
+        while (readLine())
             if (!s.empty())
                 automatic.insert(canonicalKey(s)); // Also upgrades rules saved as raw lines.
     }
