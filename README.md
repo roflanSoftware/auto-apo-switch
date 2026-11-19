@@ -8,11 +8,13 @@ AutoAPO is a small native Windows C++ tray app that switches selected Equalizer 
 2. AutoAPO reads Equalizer APO's registered configuration directory. Use **Choose config** to select a different file.
 3. PUBG (`TslGame.exe`) is watched by default. Add other executable names separated by commas, then click **Save processes**.
 4. Left checkboxes display and manually change the current enabled state. Click a right-side **Auto** checkbox to let the watcher control that entry. Selecting Auto applies the current game state immediately. All Auto boxes start unchecked.
-5. **Pause** stops automatic changes and allows manual control. **Refresh** rereads the file. Closing the window hides it. Click the tray icon once to reopen it, or right-click and choose **Exit** to close the app and keep the current audio settings.
+5. To control an Auto entry by hand, clear its **Auto** box first. **Refresh config** rereads the file. Closing the window hides it. Click the tray icon once to reopen it. To close the app and keep the current audio settings, click the red **Stop AutoAPO** button, or right-click the tray icon and choose **Exit**.
 
 The watcher checks every two seconds. Multiple games use OR logic: automatic entries stay on until the last watched game exits. Effects still apply to all audio processed by that APO device.
 
-**Start with Windows** is off by default. Enable it to launch AutoAPO in the tray when you sign in. Turn it off from the same checkbox. Keep the EXE at the same location, or toggle the option off and back on after moving it. Startup uses your normal Windows permissions, so automatic switching requires write access to your APO configuration.
+The interface is available in English, Russian and Ukrainian. AutoAPO starts in your Windows display language (English for any other language). Change it with the language selector to the right of **Choose config**. The choice is saved in `HKEY_CURRENT_USER\Software\AutoAPO\Language`.
+
+**Start with Windows** is off by default. Enable it to launch AutoAPO on your computer start. Turn it off from the same checkbox. Keep the EXE at the same location, or toggle the option off and back on after moving it. Startup uses your normal Windows permissions, so automatic switching requires write access to your APO configuration.
 
 ## Configuration handling
 
@@ -22,7 +24,7 @@ Administrator mode only accepts Equalizer APO's registered config in a protected
 - The first write saves `<config filename>.AutoAPO.backup` beside the original. Existing backups are retained.
 - Writes add/remove a leading comment marker, preserving UTF-8 text, BOM and line endings. UTF-16 input is unsupported.
 - Peace's `Include: peace.txt` supports manual and automatic switching. Structural commands remain protected.
-- Rules match complete commands, independent of line order. Editing a plugin's parameters changes its identity: reselect Auto for that entry afterward. Identical duplicate commands cannot be automated.
+- Rules match complete commands, independent of line order. For `VSTPlugin` commands the order of the parameters does not matter either, so a Configuration Editor save that only reorders them keeps the rule. Changing a parameter's value changes the command's identity: reselect Auto for that entry afterward. Identical duplicate commands cannot be automated.
 - AutoAPO creates a fresh temporary file for each write and uses Windows file replacement to preserve the target's access rules. External edits detected before replacement cancel that write. Avoid simultaneous editing during mode changes.
 - Normal-mode preferences live in `%LOCALAPPDATA%\AutoAPO\settings.txt`.
 
